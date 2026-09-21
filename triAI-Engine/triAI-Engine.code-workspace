@@ -1,0 +1,24 @@
+{
+  "folders": [
+    {
+      "name": "triAI-Engine",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "editor.formatOnSave": true,
+    "files.exclude": {
+      "**/target": true,
+      "models/*.gguf": true,
+      "data/evidence": true
+    },
+    "search.exclude": {
+      "**/target": true,
+      "models/*.gguf": true,
+      "data/evidence": true
+    },
+    "rust-analyzer.check.command": "clippy",
+    "rust-analyzer.cargo.allFeatures": true,
+    "rust-analyzer.procMacro.enable": true
+  }
+}

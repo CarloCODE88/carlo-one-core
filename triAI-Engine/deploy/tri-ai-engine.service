@@ -1,0 +1,19 @@
+[Unit]
+Description=triAI-Engine local model service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/PROJEKTE/triAI-Engine
+ExecStart=%h/PROJEKTE/triAI-Engine/target/release/tri-ai-engine
+Restart=on-failure
+RestartSec=3s
+# User service: no root, no device/partition privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/PROJEKTE/triAI-Engine/staging %h/PROJEKTE/triAI-Engine/runtime %h/PROJEKTE/triAI-Engine/logs
+
+[Install]
+WantedBy=default.target

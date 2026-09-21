@@ -1,0 +1,15 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+      - run: cargo check --locked
+      - run: cargo test --locked
+      - run: cargo bench --no-run --locked
+      - run: cargo build --release --locked

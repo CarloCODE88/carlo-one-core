@@ -1,0 +1,16 @@
+schema_version = 1
+project_name = "triAI-Engine"
+purpose = "Sicherer, beobachtbarer lokaler LLM-Service für CarloCODE"
+repository_root = "/home/carlos/PROJEKTE/triAI-Engine"
+branch = "triAI-engine"
+build_system = "cargo"
+entrypoint = "src/main.rs"
+library_root = "src/lib.rs"
+status_document = "docs/STATUS_AND_PLAN.md"
+usage_document = "docs/USAGE.md"
+evidence_directory = "docs/evidence"
+models_manifest = "models/manifest.json"
+models_are_gitignored = true
+runtime_artifacts_are_gitignored = true
+privileged_operations_enabled = false
+storage_mode = "dry_run_only"

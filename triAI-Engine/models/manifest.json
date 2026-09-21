@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "primary_mini_model": {
+    "id": "goekdenizguelmez/JOSIEFIED-Qwen3:8b",
+    "alias": "INGRIED",
+    "path": "models/primary-mini-ingried-qwen3-8b-q4_k_m.gguf",
+    "quantization": "Q4_K_M",
+    "size_bytes": 5027784352,
+    "sha256": "1de498fe269116d448a52cba3796bbad0a2ac4dc1619ff6b46674ba344dcf69d",
+    "role": "prompt classification, routing advice, background analysis",
+    "policy": "never block decode; deterministic safety rules win"
+  },
+  "fallback_mini_model": {
+    "id": "hf.co/cognitivecomputations/Dolphin3.0-Llama3.1-8B-GGUF:Q4_0",
+    "path": "models/fallback-dolphin3-llama31-8b-q4_0.gguf",
+    "quantization": "Q4_0",
+    "size_bytes": 4661223296,
+    "sha256": "56d0c669d970ae38ef2ff7b9d7588ef32783b9bd0484b413dc5dd866b739b058",
+    "role": "fallback classification and routing advice",
+    "policy": "activate on primary timeout, crash, invalid advice, or resource pressure"
+  },
+  "verification": {
+    "source": "/var/lib/ollama/blobs",
+    "copied_with": "cp --reflink=auto",
+    "model_files_are_gitignored": true,
+    "original_ollama_blobs_untouched": true
+  }
+}

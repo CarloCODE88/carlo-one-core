@@ -1,0 +1,9 @@
+/target
+.claude/worktrees/
+.worktrees/
+tri-ai-events.jsonl
+staging*/
+models/*.gguf
+runtime/
+data/evidence/
+models/packed*/

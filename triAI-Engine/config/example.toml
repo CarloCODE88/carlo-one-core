@@ -1,0 +1,50 @@
+# Nicht als produktive Konfiguration verwenden; Pfade an die Installation anpassen.
+# Optimiert: 2026-09-15 · Kanon v4
+
+[server]
+listen_addr = "127.0.0.1:8900"
+inference_timeout_secs = 120
+auth_token = ""
+
+[paths]
+project_root = "."
+models_dir = "./models"
+stage_dir = "./staging"
+llama_server = "/tmp/huxxel-cpp/build/bin/llama-server"
+event_log = "./tri-ai-events.jsonl"
+
+[worker]
+port = 8901
+readiness_timeout_secs = 60
+default_context = 4096
+default_gpu_layers = 999
+cache_type_k = "q8_0"
+cache_type_v = "q8_0"
+
+[cpu]
+threads = 8
+cpu_strict = true
+pin_cores = "0-7"
+
+[gpu]
+power_limit_w = 300
+core_clock_mhz = 1995
+memory_clock_mhz = 810
+performance_mode = true
+auto_boost = false
+
+[memory]
+vram_mb = 1024
+ram_mb = 2048
+ssd_mb = 5120
+kv_cache_quantized = true
+kv_cache_dtype_k = "q8_0"
+kv_cache_dtype_v = "q8_0"
+unified_memory_hints = true
+
+[optimizations]
+speculative_draft_model = "models/primary-mini-ingried-qwen3-8b-q4_k_m.gguf"
+moe_prefetch = true
+kernel_worker = true
+async_chunk_loading = true
+lazy_non_eager = true

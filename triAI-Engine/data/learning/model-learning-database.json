@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "database_kind": "tri_model_execution_learning",
+  "purpose": "Optionaler, lokaler Wissensspeicher für Codeausführung, Toolnutzung, Qualität und modellübergreifende Fähigkeiten.",
+  "collection": {
+    "enabled_by_default": false,
+    "storage_format": "JSONL-compatible records; migrate to SQLite/Parquet after volume justifies it",
+    "record_type": "LearningRecord",
+    "max_record_bytes": 4194304,
+    "raw_prompt": "never_by_default",
+    "raw_code": "opt_in_only_and_secret_scanned",
+    "raw_model_output": "opt_in_only_and_redacted",
+    "default_retention_days": 30,
+    "aggregated_retention": "indefinite_until_manual_delete",
+    "user_controls": ["enable_learning", "disable_learning", "delete_run", "purge_raw_fields", "export_dataset"]
+  },
+  "record_groups": {
+    "identity": ["run_id", "parent_run_id", "timestamp_ms", "prompt_hmac", "model_id", "model_digest", "policy_id"],
+    "prompt_semantics": ["knowledge_area", "task_type", "required_tools", "context_quality", "context_tokens_bucket", "language", "project_kind", "requested_quality", "latency_budget"],
+    "generation_trajectory": ["phase_durations", "input_tokens", "output_tokens", "reasoning_tokens", "output_hash", "correction_count", "stop_reason"],
+    "tool_trajectory": ["ordered_tool_names", "argument_hashes", "result_classes", "tool_durations", "exit_codes", "changed_file_count", "tool_retry_count"],
+    "code_execution": ["language", "project_kind", "command_class", "exit_code", "timeout", "stderr_class", "tests_total", "tests_failed", "lint_errors", "patch_hunks", "patch_bytes", "reproducible_failure_hash"],
+    "quality": ["quality_score", "correctness_score", "user_acceptance", "compilation_success", "test_success", "review_required", "regression_detected", "failure_classes"],
+    "resources": ["first_token_ms", "latency_p95_ms", "tokens_per_second", "vram_peak_mb", "ram_peak_mb", "pinned_ram_peak_mb", "ssd_bytes", "h2d_bytes", "d2h_bytes", "active_area_summary"],
+    "cross_model": ["task_cluster_id", "comparable_run_ids", "capability_labels", "disagreement_class", "preferred_model", "transfer_independent_signal"],
+    "privacy_and_provenance": ["raw_fields_present", "secret_scan_passed", "source_kind", "collector_version", "retention_class", "consent_state"]
+  },
+  "optional_code_execution_fields": {
+    "failure_taxonomy": ["syntax", "compile", "type", "dependency", "test", "lint", "runtime", "timeout", "permission", "tool_protocol", "hallucinated_api", "non_reproducible"],
+    "patch_features": ["files_touched", "lines_added", "lines_removed", "hunk_count", "revert_count", "formatting_only", "test_added", "security_sensitive_area"],
+    "repository_features": ["language_mix", "build_system", "test_framework", "changed_file_types", "dependency_count_bucket", "repo_size_bucket", "dirty_worktree", "branch_kind"],
+    "execution_features": ["command_class", "sandbox_lane", "cpu_threads", "timeout_ms", "stdout_size_bucket", "stderr_size_bucket", "exit_code", "signal", "network_attempted"]
+  },
+  "derived_datasets": {
+    "routing_supervision": {
+      "input": ["prompt_semantics", "resource_snapshot", "model_catalog_priors"],
+      "label": ["preferred_model", "preferred_policy", "predicted_cost_bucket"],
+      "excludes": ["active_area_summary"]
+    },
+    "tool_use_sft": {
+      "input": ["prompt_semantics", "conversation_hash", "tool_trajectory"],
+      "label": ["ordered_tool_names", "valid_arguments_shape", "successful_result_class"]
+    },
+    "code_repair_sft": {
+      "input": ["failure_classes", "stderr_class", "repository_features", "code_context_hash"],
+      "label": ["patch_features", "compilation_success", "test_success"]
+    },
+    "preference_pairs": {
+      "positive": ["user_acceptance", "test_success", "low_latency", "low_transfer_cost"],
+      "negative": ["regression_detected", "retry_count_high", "hallucinated_api", "quality_score_low"]
+    },
+    "model_capability_matrix": {
+      "keys": ["task_type", "knowledge_area", "context_quality", "language", "project_kind"],
+      "values": ["success_rate", "quality_mean", "p95_latency", "tokens_per_second", "tool_success_rate", "transfer_cost_mean", "confidence"]
+    }
+  },
+  "model_independent_patterns": {
+    "learn": ["task_to_failure_class", "tool_sequence_to_success", "context_quality_to_retry_rate", "repo_shape_to_tool_cost", "language_to_test_failure", "prompt_ambiguity_to_correction_count", "quality_vs_latency_tradeoff"],
+    "do_not_assume": ["expert_id_means_semantic_skill", "model_family_implies_derivative_quality", "single_success_is_general_rule", "correlation_is_causation"],
+    "minimum_evidence": {"within_model_runs": 20, "cross_model_runs": 50, "distinct_models": 2, "successful_repetitions": 5},
+    "confounders": ["context_length", "temperature", "system_prompt", "tool_availability", "hardware_pressure", "warmup_state", "quantization"]
+  },
+  "privacy_rules": {
+    "hash_or_bucket": ["prompt", "model_output", "tool_arguments", "stdout", "stderr", "file_paths"],
+    "secret_scan_before_storage": true,
+    "never_store": ["api_keys", "pins", "tokens", "passwords", "private_credentials", "full_repository_without_opt_in"],
+    "raw_data_mode": "explicit_opt_in_with_retention_and_purge",
+    "training_export": "only records passing secret scan and consent policy"
+  },
+  "promotion_rules": {
+    "candidate_to_pattern": "minimum_evidence_met AND confidence >= 0.70",
+    "pattern_to_routing_policy": "two_models AND quality_regression <= 0.05 AND three stable windows",
+    "rollback": "p95_latency +20 percent OR success_rate -10 percent OR privacy_violation",
+    "human_review_required_for": ["security_sensitive_area", "new_tool_permission", "automatic_model_switch", "raw_code_training_export"]
+  },
+  "consumer_contract": {
+    "mini_model": ["classify", "summarize_failure", "suggest_tool_sequence", "compare_models", "detect_anomaly"],
+    "deterministic_engine": ["enforce_safety", "execute_tools", "measure_resources", "persist_ids_and_digests"],
+    "future_local_llm_training": ["SFT tool traces", "DPO preference pairs", "routing classifier", "code-repair evaluator", "capability matrix"]
+  }
+}

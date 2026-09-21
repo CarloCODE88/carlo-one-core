@@ -1,0 +1,647 @@
+{
+  "schema_version": 1,
+  "database_kind": "tri_prompt_routing_knowledge_seed",
+  "created_from": {
+    "local_inventory": "models/ollama-inventory.json",
+    "local_roles": "models/roles.json",
+    "direct_gguf": ["models/stories260K.gguf"],
+    "note": "Seed-Wissen; Laufzeitbeobachtungen werden separat als Evidence gespeichert."
+  },
+  "hardware_profile": {
+    "gpu": {
+      "vendor": "nvidia",
+      "family": "turing",
+      "model": "GeForce RTX 2080 Ti Zotac AMP OC",
+      "vram_mb": 11264,
+      "compute_capability": "7.5",
+      "memory_bandwidth_gbps": 616,
+      "policy": "VRAM für Dense-Core, KV-Cache und Hot-Expert-Slots reservieren; keine SSD-Reads im Decode-Pfad."
+    },
+    "cpu": {
+      "family": "AMD Ryzen 5",
+      "assumed_physical_cores": 6,
+      "assumed_threads": 12,
+      "policy": "Maximal vier physische Kerne für CPU-Fallbacks; ein Kern für I/O/Prefetch, ein Kern für Steuerung."
+    },
+    "storage": {
+      "cold_store": "120GB SSD",
+      "policy": "GGUF-Cold-Store und Warmup; keine synchronen SSD-Zugriffe pro Token."
+    }
+  },
+  "routing_dimensions": {
+    "knowledge_area": [
+      "software_engineering",
+      "rust_systems",
+      "python_scripting",
+      "general_reasoning",
+      "mathematics",
+      "research_synthesis",
+      "architecture",
+      "operations",
+      "creative_dialogue",
+      "structured_extraction"
+    ],
+    "task_type": [
+      "code_generation",
+      "code_review",
+      "debugging",
+      "repository_navigation",
+      "refactoring",
+      "planning",
+      "research",
+      "summarization",
+      "tool_execution",
+      "chat",
+      "long_context_analysis"
+    ],
+    "context_quality": [
+      "none",
+      "short_clean",
+      "long_clean",
+      "noisy",
+      "conflicting",
+      "repository_grounded",
+      "source_grounded"
+    ],
+    "active_area_estimate": [
+      "dense_full_model",
+      "dense_layer_window",
+      "moe_router_top_k",
+      "moe_hot_expert_set",
+      "kv_cache_dominant",
+      "tool_context_dominant"
+    ]
+  },
+  "standard_policy": {
+    "confidence_floor": 0.62,
+    "exploration_rate": 0.08,
+    "minimum_evidence_runs": 5,
+    "heatmap_decay": 0.97,
+    "expert_cache_update_tokens": 64,
+    "prefetch_depth_default": 1,
+    "prefetch_depth_max": 3,
+    "vram_safety_reserve_mb": 1536,
+    "kv_cache_reserve_mb": 2048,
+    "pinned_ram_default_mb": 1536,
+    "pinned_ram_max_mb": 2048,
+    "max_cpu_fallback_threads": 4,
+    "ssd_decode_reads_allowed": false,
+    "learning_rule": "seed_priors_are_not_replaced_until_runtime_evidence_reaches_minimum_evidence_runs",
+    "decision_layers": [
+      "hard_safety_guard",
+      "deterministic_runtime_policy",
+      "model_prior_fusion",
+      "mini_model_advisor",
+      "background_pattern_analysis"
+    ],
+    "advisor_budget": {
+      "max_decision_latency_ms": 20,
+      "max_prompt_tokens": 256,
+      "max_tokens_per_advice": 96,
+      "never_block_decode": true,
+      "fallback_on_timeout": "deterministic_runtime_policy"
+    }
+  },
+  "live_monitoring": {
+    "sampling": {
+      "telemetry_interval_ms": 100,
+      "decode_window_tokens": 32,
+      "trend_window_seconds": 3,
+      "prediction_horizon_tokens": 128,
+      "hysteresis_ratio": 0.08,
+      "minimum_trigger_hold_ms": 250,
+      "cooldown_ms_by_action": {
+        "prefetch": 100,
+        "evict_expert": 250,
+        "evict_layer": 1000,
+        "kv_repartition": 2000,
+        "model_switch_advice": 5000
+      }
+    },
+    "variables": [
+      {"name":"vram_free_mb","type":"gauge","source":"nvidia_smi_or_cuda","criticality":"hard"},
+      {"name":"vram_free_slope_mb_per_s","type":"trend","derived_from":"vram_free_mb","criticality":"hard"},
+      {"name":"vram_pressure","type":"derived","formula":"1 - vram_free_mb / usable_vram_mb","criticality":"hard"},
+      {"name":"kv_cache_mb","type":"gauge","source":"runtime","criticality":"high"},
+      {"name":"kv_growth_mb_per_128_tokens","type":"trend","derived_from":"kv_cache_mb","criticality":"high"},
+      {"name":"decode_tokens_per_s","type":"window_metric","source":"runtime","criticality":"high"},
+      {"name":"decode_latency_p95_ms","type":"window_metric","source":"runtime","criticality":"high"},
+      {"name":"h2d_bandwidth_gbps","type":"window_metric","source":"cuda_events","criticality":"medium"},
+      {"name":"d2h_bandwidth_gbps","type":"window_metric","source":"cuda_events","criticality":"medium"},
+      {"name":"expert_cache_hit_rate","type":"window_metric","source":"router_trace","only_for":"moe","criticality":"high"},
+      {"name":"expert_reuse_distance_tokens","type":"window_metric","source":"router_trace","only_for":"moe","criticality":"high"},
+      {"name":"prefetch_accuracy","type":"window_metric","source":"prefetch_log","criticality":"medium"},
+      {"name":"ram_available_mb","type":"gauge","source":"proc_meminfo","criticality":"high"},
+      {"name":"pinned_ram_used_mb","type":"gauge","source":"cuda_allocator","criticality":"high"},
+      {"name":"ssd_queue_depth","type":"gauge","source":"iostat","criticality":"medium"},
+      {"name":"context_tokens_remaining","type":"derived","formula":"context_limit - tokens_in - generated_tokens","criticality":"high"},
+      {"name":"tool_probability","type":"model_score","source":"prompt_classifier","criticality":"medium"},
+      {"name":"prompt_phase","type":"state","values":["classify","context_load","tool_call","decode","finalize"],"criticality":"high"}
+    ],
+    "triggers": [
+      {
+        "id":"vram_critical_guard",
+        "when":"vram_free_mb < max(vram_safety_reserve_mb, 768)",
+        "priority":100,
+        "actions":["stop_new_prefetch","evict_coldest_dynamic_region","preserve_kv_cache"],
+        "reason":"OOM-Schutz; Mini-Modell darf diesen Trigger nicht überstimmen"
+      },
+      {
+        "id":"vram_pressure_rising",
+        "when":"vram_pressure >= 0.82 AND vram_free_slope_mb_per_s < -128",
+        "priority":90,
+        "actions":["reduce_prefetch_depth","evict_low_reuse_region","recompute_residency_plan"],
+        "prediction":"VRAM wird voraussichtlich innerhalb des nächsten Decode-Fensters knapp"
+      },
+      {
+        "id":"kv_cache_growth_forecast",
+        "when":"kv_growth_mb_per_128_tokens > 0 AND forecast_kv_cache_mb(128) > usable_vram_mb * 0.35",
+        "priority":85,
+        "actions":["reserve_kv_budget","lower_prefetch_budget","recommend_kv_quantization_or_context_cap"],
+        "prediction":"Kontextwachstum verdrängt wahrscheinlich Modell-/Expertenspeicher"
+      },
+      {
+        "id":"moe_reuse_prefetch",
+        "when":"architecture_kind == 'moe' AND expert_cache_hit_rate < 0.72 AND expert_reuse_distance_tokens < 96 AND vram_free_mb > vram_safety_reserve_mb + 1024",
+        "priority":70,
+        "actions":["prefetch_predicted_experts","increase_prefetch_depth_by_one"],
+        "guard":"prefetch_accuracy >= 0.55"
+      },
+      {
+        "id":"moe_prefetch_waste",
+        "when":"architecture_kind == 'moe' AND prefetch_accuracy < 0.45",
+        "priority":75,
+        "actions":["disable_speculative_prefetch","retain_only_router_confirmed_experts","learn_new_hotset"],
+        "reason":"Fehlvorhersagen kosten VRAM-Bandbreite und können Decode verlangsamen"
+      },
+      {
+        "id":"transfer_bound_decode",
+        "when":"decode_latency_p95_ms > baseline_latency_p95_ms * 1.35 AND h2d_bandwidth_gbps > 0",
+        "priority":80,
+        "actions":["increase_hot_region_budget","batch_transfers_between_tokens","fallback_to_warm_ram"],
+        "guard":"ram_available_mb > pinned_ram_default_mb + 512"
+      },
+      {
+        "id":"ssd_cold_path_violation",
+        "when":"ssd_queue_depth > 0 AND prompt_phase == 'decode'",
+        "priority":95,
+        "actions":["abort_synchronous_ssd_read","promote_region_to_pinned_ram","mark_policy_violation"],
+        "reason":"SSD gehört nur in Vorbereitung/Warmup, nicht in den Tokenpfad"
+      },
+      {
+        "id":"tool_context_expansion",
+        "when":"tool_probability >= 0.65 OR prompt_flags.task_type == 'tool_execution'",
+        "priority":60,
+        "actions":["reserve_context_headroom","prefetch_tool_schema","increase_context_quality_weight"],
+        "model_prior":"required_tools_and_context_quality"
+      },
+      {
+        "id":"context_exhaustion_forecast",
+        "when":"context_tokens_remaining < max(512, context_limit * 0.08)",
+        "priority":88,
+        "actions":["stop_optional_prefetch","compact_or_summarize_context","protect_recent_kv_tokens"]
+      },
+      {
+        "id":"model_switch_advice",
+        "when":"predicted_quality < requested_quality AND predicted_cost_ms > latency_budget_ms * 1.5",
+        "priority":45,
+        "actions":["ask_mini_model_for_alternative_model","do_not_switch_automatically"],
+        "reason":"Modellwechsel ist eine Beratung, keine autonome harte Aktion"
+      }
+    ]
+  },
+  "decision_matrix": {
+    "fusion_order": ["hard_safety_guard", "runtime_measurements", "model_prior", "learned_evidence", "mini_model_advice"],
+    "score_formula": "0.35*runtime_fit + 0.25*model_prior_fit + 0.20*resource_fit + 0.15*learned_outcome + 0.05*exploration",
+    "model_prior_rules": [
+      {"if":"architecture_kind == 'moe'","use":["num_experts","experts_per_token","initial_hotset_policy","initial_prefetch_depth"]},
+      {"if":"architecture_kind == 'dense'","use":["layers","initial_hotset_policy","initial_cpu_fallback"],"note":"kein Expertenswitching; Layer-Residency nur als Transferplanung"},
+      {"if":"context_quality in ['repository_grounded','source_grounded']","boost":["repository_navigation","research_synthesis","tool_execution"]},
+      {"if":"required_tools is not empty","reserve":["tool_context_headroom","tool_schema_cache"]}
+    ],
+    "actions_by_residency": {
+      "moe_router_top_k":"router_trace -> predicted_expert_ids -> pinned_ram -> async H2D -> VRAM hotset",
+      "moe_hot_expert_set":"keep_high_reuse_experts_in_vram; evict_by_reuse_distance_and_cost",
+      "dense_layer_window":"prefetch_next_layer_group; never pretend inactive layers are semantically unused",
+      "kv_cache_dominant":"protect_recent_kv; reduce_optional_model_cache_before_KV"
+    }
+  },
+  "background_analysis": {
+    "principle":"Mini-Modell arbeitet asynchron auf aggregierten Telemetriefenstern und darf Decode nicht blockieren.",
+    "jobs": [
+      {"id":"prompt_cluster_refresh","interval_minutes":15,"input":"hashed_prompt_flags_and_outcomes","output":"cross_model_task_clusters","min_samples":20},
+      {"id":"model_routing_calibration","interval_minutes":30,"input":"quality_cost_resource_traces","output":"updated_model_prior_weights","min_samples":30},
+      {"id":"moe_hotset_mining","interval_minutes":10,"input":"expert_ids_reuse_distance_cache_hits","output":"per_task_and_global_hotsets","only_for":"moe","min_samples":50},
+      {"id":"transfer_bottleneck_report","interval_minutes":30,"input":"h2d_d2h_latency_prefetch_accuracy","output":"recommended_prefetch_and_pinned_ram_limits","min_samples":20},
+      {"id":"model_cross_generalization","interval_hours":6,"input":"normalized_outcomes_across_models","output":"task_model_capability_matrix","min_samples":50},
+      {"id":"anomaly_detection","interval_minutes":5,"input":"time_series_telemetry","output":"thermal_oom_thrash_and_regression_alerts","min_samples":10}
+    ],
+    "cross_model_features": ["task_type","knowledge_area","context_tokens_bucket","tool_count","quality_score","tokens_per_second","p95_latency_ms","vram_peak_mb","h2d_bytes_per_token","retry_rate"],
+    "promotion_rules": {
+      "seed_to_local_prior":"minimum_evidence_runs >= 5 AND confidence >= 0.62",
+      "local_prior_to_global_pattern":"at_least_two_models AND at_least_20_successful_runs",
+      "reject_pattern":"quality_regression > 0.10 OR sample_conflict_rate > 0.35",
+      "rollback":"new_policy_worsens_p95_latency_by_20_percent_for_3_windows"
+    }
+  },
+  "ssd_preparator": {
+    "status": "planned_dry_run_only",
+    "purpose": "Eigene, kontrollierte Cold-/Warm-Storage-Partition für Modelle, Prefetch-Dateien und Telemetrie vorbereiten.",
+    "safety_contract": {
+      "never_auto_partition": true,
+      "never_auto_format": true,
+      "require_explicit_device_path": true,
+      "require_interactive_confirmation_with_device_serial": true,
+      "reject_if_device_is_root_or_boot_device": true,
+      "reject_if_mounted_elsewhere": true,
+      "reject_if_removable_or_unknown": true,
+      "dry_run_default": true,
+      "backup_required": true,
+      "record_before_after_lsblk": true
+    },
+    "target_layout": {
+      "device_class": "dedicated_ssd_or_free_partition; never assume the 120GB device path",
+      "partition_table": "GPT",
+      "alignment": "1MiB boundary via sfdisk/parted safe alignment",
+      "recommended_capacity_gib": 100,
+      "reserved_free_space_percent": 15,
+      "filesystem": "ext4",
+      "filesystem_reason": "predictable mmap/page-cache behavior, mature recovery, good extent allocation and no copy-on-write write amplification for large immutable GGUF files",
+      "label": "TRI_RUNNER",
+      "mountpoint": "/var/lib/tri-ai-runner",
+      "mount_options": ["noatime", "discard=async", "commit=60"],
+      "discard_policy": "Prefer periodic fstrim.timer if discard=async is not validated on the device; never trim per token or per cache event.",
+      "dax": "disabled_by_default; ordinary SSD page cache is the safer baseline",
+      "encryption": "optional LUKS2 when models or traces are sensitive; benchmark unlock and discard behavior before production"
+    },
+    "directory_layout": {
+      "models_cold": "models/cold",
+      "models_staged": "models/staged",
+      "prefetch_manifests": "prefetch/manifests",
+      "telemetry_batches": "telemetry/batches",
+      "telemetry_compacted": "telemetry/compacted",
+      "crash_artifacts": "diagnostics",
+      "lock_file": "runner-storage.lock",
+      "rule": "Decode darf nur aus VRAM, pinned RAM oder normalem RAM lesen; SSD ist ausschließlich Cold-Store, Warmup und asynchrones Nachladen."
+    },
+    "preparation_phases": [
+      {"phase":1,"name":"inventory","actions":["lsblk --json","udevadm info","findmnt","smartctl_or_nvme_health"],"writes":false},
+      {"phase":2,"name":"capacity_check","actions":["verify_free_unallocated_space","verify_15_percent_headroom","check_model_and_trace_capacity"],"writes":false},
+      {"phase":3,"name":"dry_run_plan","actions":["print_exact_partition_table","print_mkfs_command","print_fstab_by_UUID","print_rollback_notes"],"writes":false},
+      {"phase":4,"name":"explicit_apply","actions":["create_partition","mkfs_ext4","mount_temporary","create_directory_layout","set_owner_and_permissions","persist_fstab"],"writes":true},
+      {"phase":5,"name":"validation","actions":["mount_check","fio_read_only_profile","mmap_smoke_test","fstrim_check","runner_cold_warm_test"],"writes":true}
+    ],
+    "permissions": {
+      "runner_user": "dedicated unprivileged tri-runner user",
+      "directory_mode": "0750",
+      "model_files_mode": "0640",
+      "telemetry_mode": "0640",
+      "privileged_operations": ["partitioning", "mkfs", "mount", "fstab_write", "fstrim"],
+      "runtime_rule": "The runner never receives CAP_SYS_ADMIN and never performs partitioning or mkfs during normal inference."
+    },
+    "runtime_integration": {
+      "storage_state_machine": ["cold_ssd", "staging_read", "ram_warm", "pinned_ram", "vram_hot", "evict_to_pinned_ram", "evict_to_ram", "evict_to_ssd"],
+      "promotion_policy": "prefetch to RAM before H2D; promote to pinned RAM only when predicted reuse and available budget justify it",
+      "eviction_policy": "reuse_distance + transfer_cost + model_prior + vram_pressure",
+      "ssd_read_trigger": "only during classify/context_load/warmup and never when prompt_phase == decode",
+      "health_triggers": ["SMART warning", "filesystem_read_error", "ssd_queue_depth_high", "free_space_below_15_percent", "temperature_high"],
+      "fallback": "disable SSD prefetch and continue with RAM/VRAM policy if health or latency thresholds fail"
+    },
+    "sources": [
+      {"title":"Linux ext4 allocator documentation","url":"https://docs.kernel.org/filesystems/ext4/allocators.html","used_for":"extent allocation and locality rationale for large model files"},
+      {"title":"fstrim manual","url":"https://man7.org/linux/man-pages/man8/fstrim.8.html","used_for":"weekly trim guidance and warning against overly frequent discard"},
+      {"title":"Linux ext4 administration documentation","url":"https://docs.kernel.org/admin-guide/ext4.html","used_for":"ext4 mount and allocation behavior"}
+    ]
+  },
+  "model_compression": {
+    "status": "planned_indexed_tensor_store",
+    "principle": "Kein monolithisches ZIP im Decode-Pfad. GGUF bleibt das kompatible Laufzeitformat; die platzsparende Cold-Storage-Variante wird tensor- und chunkweise indexiert, damit nur benötigte Bereiche gelesen und entpackt werden.",
+    "compression_targets": {
+      "primary": "effective_disk_space",
+      "secondary": "preserve_random_access_and_warmup_speed",
+      "hard_limits": ["no_full_model_decompression_before_start", "no_ssd_read_per_decode_token", "no_quality_downgrade_without_validation"]
+    },
+    "area_categories": {
+      "metadata_tokenizer": {"priority":"always_hot","compression":"none_or_light","reason":"klein, beim Start vollständig laden"},
+      "embedding_and_output": {"priority":"hot","compression":"Q8_0_or_Q6_K","reason":"sensitiv für Eingangs-/Ausgangsqualität; nicht aggressiv komprimieren"},
+      "norms_and_biases": {"priority":"always_hot","compression":"F32_or_F16","reason":"sehr klein, Qualitätsrisiko höher als Speichergewinn"},
+      "attention_weights": {"priority":"hot_or_next_layer","compression":"Q4_K_M_default; Q5_K_M_for_quality_sensitive_profile","reason":"jede Schicht benötigt Attention; Layer-Prefetch statt semantischer Teilaktivierung"},
+      "ffn_dense_weights": {"priority":"warm_or_next_layer","compression":"Q4_K_M; Q3_K_S_only_after_quality_gate","reason":"größter Gewichtsanteil bei dichten Modellen"},
+      "moe_router_weights": {"priority":"always_hot","compression":"Q8_0_or_F16","reason":"Router entscheidet die nächsten Expert-Chunks"},
+      "moe_expert_blocks": {"priority":"dynamic_hotset","compression":"Q4_K_M_per_expert_chunk; Q3_K_S_for_cold_experts_only","reason":"Expert-ID und Wiederverwendungsabstand steuern H2D-Prefetch"},
+      "kv_cache": {"priority":"vram_dynamic","compression":"runtime_q8_or_q6_policy","reason":"kein dauerhaftes Modelldatei-Compressionsthema; Kontext wächst während der Ausführung"}
+    },
+    "artifact_formats": {
+      "runtime_hot": "standard GGUF or tensor-aligned GGUF shards, directly mmap-able",
+      "cold_chunks": "independent zstd frames with seek table and per-chunk checksum",
+      "index": "JSON or binary manifest mapping model_digest + tensor_name + layer + expert_id to offset, compressed_size, raw_size, checksum, category, priority",
+      "chunk_size": {"minimum_kib":256,"default_mib":16,"maximum_mib":64,"rule":"Chunks must not cross tensor boundaries; expert chunks are preferably one expert/layer block or a small fixed group."},
+      "compatibility": "Reconstruct a validated GGUF shard or materialize only the requested tensor into pinned RAM; never alter tensor ordering silently."
+    },
+    "model_profiles": [
+      {"model_id":"qwen3-coder:30b","profile":"moe_selective","base_quant":"Q4_K_M","keep_uncompressed":["metadata_tokenizer","moe_router_weights","norms_and_biases"],"dynamic_units":"layer/expert","cold_policy":"zstd_cold_expert_chunks","expected_advantage":"large disk reduction for cold experts without loading all experts; actual speed depends on router locality and cache hit rate"},
+      {"model_id":"qwen2.5-coder:14b","profile":"dense_layer_shards","base_quant":"Q4_K_M","dynamic_units":"layer_group","cold_policy":"zstd_cold_layer_shards","quality_fallback":"Q5_K_M for attention/output if benchmark shows regression"},
+      {"model_id":"qwen3:14b","profile":"dense_reasoning_layer_shards","base_quant":"Q4_K_M","dynamic_units":"layer_group","cold_policy":"zstd_cold_layer_shards","quality_fallback":"Q5_K_M for reasoning-sensitive layers"},
+      {"model_id":"goekdenizguelmez/JOSIEFIED-Qwen3:8b","profile":"dense_full_or_light_offload","base_quant":"Q4_K_M","dynamic_units":"layer_group","cold_policy":"compress only inactive model variants and backup copies"},
+      {"model_id":"huihui_ai/qwen3-abliterated:14b-v2","profile":"dense_layer_shards","base_quant":"Q4_K_M","dynamic_units":"layer_group","cold_policy":"zstd_cold_layer_shards","quality_fallback":"retain original artifact because derivative quality is uncertain"},
+      {"model_id":"hf.co/cognitivecomputations/Dolphin3.0-Llama3.1-8B-GGUF:Q4_0","profile":"dense_compact","base_quant":"Q4_0","dynamic_units":"layer_group","cold_policy":"prefer existing Q4_0 for speed/space; compare Q4_K_M only if quality gain justifies extra space"}
+    ],
+    "pipeline": [
+      {"step":1,"name":"source_preservation","action":"keep original model, digest and tokenizer read-only"},
+      {"step":2,"name":"quality_aware_quantization","action":"quantize from F16/BF16 with imatrix calibration; preserve router, norms, embeddings and output at higher precision"},
+      {"step":3,"name":"tensor_area_index","action":"classify tensors by metadata/layer/attention/FFN/router/expert and write manifest"},
+      {"step":4,"name":"shard","action":"use tensor-boundary-aware GGUF splitting; avoid byte-level cuts"},
+      {"step":5,"name":"cold_compress","action":"compress only cold shards/chunks with independent seekable frames"},
+      {"step":6,"name":"warmup","action":"load metadata, router, norms and predicted first regions; asynchronously inflate next chunks into RAM/pinned RAM"},
+      {"step":7,"name":"validation","action":"compare perplexity, task quality, startup time, first-token latency, tokens/s, H2D bytes and cache hit rate"}
+    ],
+    "runtime_policy": {
+      "promotion_order":"cold_ssd -> decompressed_ram -> pinned_ram -> vram_hot",
+      "prefetch_source":"router prediction for MoE; next-layer schedule for dense models",
+      "eviction_key":"reuse_distance + decompression_cost + h2d_cost + model_prior + vram_pressure",
+      "decompression_threads":2,
+      "prefetch_ahead_chunks":1,
+      "max_parallel_decompress":2,
+      "cache_rule":"Never evict metadata/router/KV-protected regions for speculative cold chunks.",
+      "disable_compression_when":"decompression_p95_ms > 0.25 * decode_step_ms OR cache_hit_rate < 0.55 OR quality_regression > 0.05"
+    },
+    "measurement_schema": ["raw_size_bytes","compressed_size_bytes","compression_ratio","decompression_p50_ms","decompression_p95_ms","startup_ms","first_token_ms","tokens_per_second","h2d_bytes","ssd_bytes","cache_hit_rate","quality_score","perplexity_delta"],
+    "success_gates": {
+      "disk_saving_minimum":">= 15 percent versus source artifact",
+      "startup_regression_max":"<= 10 percent",
+      "decode_regression_max":"<= 5 percent after warmup",
+      "quality_regression_max":"perplexity_delta <= 0.05 or task_quality_delta <= 0.05",
+      "rollback":"retain original GGUF and atomically switch manifest only after all gates pass"
+    },
+    "research_basis": [
+      {"title":"llama.cpp quantization guide","url":"https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md","claim":"Quantization reduces model size; imatrix can reduce accuracy loss."},
+      {"title":"llama.cpp GGUF split discussion","url":"https://github.com/ggerganov/llama.cpp/discussions/6404","claim":"Tensor-boundary-aware GGUF shards are supported and can be loaded without cutting tensors."},
+      {"title":"GGUF format header","url":"https://github.com/ggml-org/llama.cpp/blob/master/ggml/include/gguf.h","claim":"GGUF stores tensor names, types and byte offsets, enabling an external area index."}
+    ]
+  },
+  "models": [
+    {
+      "model_id": "qwen3-coder:30b",
+      "family": "qwen3moe",
+      "architecture_kind": "moe",
+      "parameters_total": 30.5,
+      "parameters_active_approx": 3.3,
+      "quantization": "Q4_K_M",
+      "file_size_bytes": 18556700761,
+      "context_tokens_catalog": 262144,
+      "layers": 48,
+      "num_experts": 128,
+      "experts_per_token": 8,
+      "hidden_size": 2048,
+      "moe_intermediate_size": 768,
+      "num_attention_heads": 32,
+      "num_key_value_heads": 4,
+      "routing_prior": {
+        "knowledge_area": ["software_engineering", "rust_systems", "architecture", "research_synthesis"],
+        "task_type": ["code_generation", "code_review", "debugging", "repository_navigation", "tool_execution", "long_context_analysis"],
+        "required_tools": ["read_file", "search_files", "patch_file", "run_code", "git_status"],
+        "context_quality": ["repository_grounded", "source_grounded", "long_clean"],
+        "active_area_estimate": "moe_router_top_k",
+        "initial_hotset_policy": "per_layer_hot_expert_cache",
+        "initial_prefetch_depth": 1,
+        "initial_cpu_fallback": "miss_only",
+        "confidence": 0.86
+      },
+      "residency_prior": {
+        "dense_core": "vram",
+        "hot_experts": "vram_dynamic",
+        "warm_experts": "pinned_ram_or_ram",
+        "cold_experts": "ssd_mmap_then_ram",
+        "kv_cache": "vram_priority",
+        "recommended_mode": "dynamic_moe_expert_cache"
+      },
+      "evidence": {
+        "source_type": "official_model_config_and_local_ollama_inventory",
+        "community_signal": "MoE expert caching and selective CPU offload are promising, but routing locality and cache policy are workload-dependent.",
+        "status": "seed_prior_not_local_benchmark_verified"
+      }
+    },
+    {
+      "model_id": "qwen2.5-coder:14b",
+      "family": "qwen2",
+      "architecture_kind": "dense",
+      "parameters_total": 14.8,
+      "quantization": "Q4_K_M",
+      "file_size_bytes": 8988124298,
+      "context_tokens_catalog": 32768,
+      "layers": 48,
+      "hidden_size": 5120,
+      "num_attention_heads": 40,
+      "num_key_value_heads": 8,
+      "routing_prior": {
+        "knowledge_area": ["software_engineering", "rust_systems", "python_scripting", "architecture"],
+        "task_type": ["code_generation", "code_review", "debugging", "refactoring", "repository_navigation"],
+        "required_tools": ["read_file", "search_files", "patch_file", "run_code", "git_status"],
+        "context_quality": ["repository_grounded", "short_clean", "long_clean"],
+        "active_area_estimate": "dense_layer_window",
+        "initial_hotset_policy": "static_layer_offload",
+        "initial_prefetch_depth": 1,
+        "initial_cpu_fallback": "layer_offload",
+        "confidence": 0.88
+      },
+      "residency_prior": {
+        "dense_core": "vram_plus_ram",
+        "hot_experts": "not_applicable",
+        "warm_experts": "not_applicable",
+        "cold_experts": "not_applicable",
+        "kv_cache": "vram_priority",
+        "recommended_mode": "static_layer_offload"
+      },
+      "evidence": {
+        "source_type": "official_model_config_and_local_ollama_inventory",
+        "community_signal": "Strong coding specialization; dense architecture means dynamic expert caching does not apply.",
+        "status": "seed_prior_not_local_benchmark_verified"
+      }
+    },
+    {
+      "model_id": "qwen3:14b",
+      "family": "qwen3",
+      "architecture_kind": "dense",
+      "parameters_total": 14.8,
+      "quantization": "Q4_K_M",
+      "file_size_bytes": 9276198565,
+      "context_tokens_catalog": 40960,
+      "layers": 40,
+      "hidden_size": 5120,
+      "num_attention_heads": 40,
+      "num_key_value_heads": 8,
+      "routing_prior": {
+        "knowledge_area": ["general_reasoning", "mathematics", "research_synthesis", "software_engineering"],
+        "task_type": ["planning", "research", "summarization", "tool_execution", "chat", "code_review"],
+        "required_tools": ["read_file", "search_files", "git_status"],
+        "context_quality": ["source_grounded", "long_clean", "conflicting"],
+        "active_area_estimate": "dense_layer_window",
+        "initial_hotset_policy": "static_layer_offload",
+        "initial_prefetch_depth": 1,
+        "initial_cpu_fallback": "layer_offload",
+        "confidence": 0.82
+      },
+      "residency_prior": {
+        "dense_core": "vram_plus_ram",
+        "hot_experts": "not_applicable",
+        "warm_experts": "not_applicable",
+        "cold_experts": "not_applicable",
+        "kv_cache": "vram_priority",
+        "recommended_mode": "static_layer_offload"
+      },
+      "evidence": {
+        "source_type": "official_model_config_and_local_ollama_inventory",
+        "community_signal": "Tool calling and thinking are useful, but runtime cost increases with reasoning and context length.",
+        "status": "seed_prior_not_local_benchmark_verified"
+      }
+    },
+    {
+      "model_id": "goekdenizguelmez/JOSIEFIED-Qwen3:8b",
+      "alias": "INGRIED",
+      "family": "qwen3",
+      "architecture_kind": "dense",
+      "parameters_total": 8.2,
+      "quantization": "Q4_K_M",
+      "file_size_bytes": 5027787856,
+      "context_tokens_catalog": 40960,
+      "routing_prior": {
+        "knowledge_area": ["general_reasoning", "creative_dialogue", "research_synthesis", "software_engineering"],
+        "task_type": ["chat", "planning", "research", "summarization", "tool_execution"],
+        "required_tools": ["read_file", "search_files", "git_status"],
+        "context_quality": ["short_clean", "source_grounded", "noisy"],
+        "active_area_estimate": "dense_layer_window",
+        "initial_hotset_policy": "full_gpu_if_possible",
+        "initial_prefetch_depth": 0,
+        "initial_cpu_fallback": "none_if_fits",
+        "confidence": 0.74
+      },
+      "residency_prior": {
+        "dense_core": "vram",
+        "hot_experts": "not_applicable",
+        "warm_experts": "not_applicable",
+        "cold_experts": "not_applicable",
+        "kv_cache": "vram_priority",
+        "recommended_mode": "full_gpu_or_light_layer_offload"
+      },
+      "evidence": {
+        "source_type": "local_ollama_inventory_and_role_config",
+        "community_signal": "Useful fast general/role model; fine-tune behavior must be learned from local evidence rather than assumed from base family.",
+        "status": "seed_prior_not_local_benchmark_verified"
+      }
+    },
+    {
+      "model_id": "huihui_ai/qwen3-abliterated:14b-v2",
+      "family": "qwen3",
+      "architecture_kind": "dense",
+      "parameters_total": 14.8,
+      "quantization": "Q4_K_M",
+      "file_size_bytes": 9001762501,
+      "context_tokens_catalog": 40960,
+      "routing_prior": {
+        "knowledge_area": ["general_reasoning", "software_engineering", "research_synthesis"],
+        "task_type": ["chat", "planning", "research", "code_review", "tool_execution"],
+        "required_tools": ["read_file", "search_files", "git_status"],
+        "context_quality": ["short_clean", "noisy", "conflicting"],
+        "active_area_estimate": "dense_layer_window",
+        "initial_hotset_policy": "static_layer_offload",
+        "initial_prefetch_depth": 1,
+        "initial_cpu_fallback": "layer_offload",
+        "confidence": 0.66
+      },
+      "residency_prior": {
+        "dense_core": "vram_plus_ram",
+        "hot_experts": "not_applicable",
+        "warm_experts": "not_applicable",
+        "cold_experts": "not_applicable",
+        "kv_cache": "vram_priority",
+        "recommended_mode": "static_layer_offload"
+      },
+      "evidence": {
+        "source_type": "local_ollama_inventory",
+        "community_signal": "Derivative model behavior is variant-specific; do not inherit Qwen3 quality assumptions without local evaluation.",
+        "status": "low_confidence_seed_prior"
+      }
+    },
+    {
+      "model_id": "hf.co/cognitivecomputations/Dolphin3.0-Llama3.1-8B-GGUF:Q4_0",
+      "family": "llama",
+      "architecture_kind": "dense",
+      "parameters_total": 8.03,
+      "quantization": "Q4_0",
+      "file_size_bytes": 4661224068,
+      "context_tokens_catalog": 131072,
+      "routing_prior": {
+        "knowledge_area": ["general_reasoning", "software_engineering", "python_scripting", "creative_dialogue"],
+        "task_type": ["chat", "code_generation", "summarization", "planning", "tool_execution"],
+        "required_tools": [],
+        "context_quality": ["short_clean", "long_clean", "noisy"],
+        "active_area_estimate": "dense_layer_window",
+        "initial_hotset_policy": "full_gpu_if_possible",
+        "initial_prefetch_depth": 0,
+        "initial_cpu_fallback": "none_if_fits",
+        "confidence": 0.72
+      },
+      "residency_prior": {
+        "dense_core": "vram",
+        "hot_experts": "not_applicable",
+        "warm_experts": "not_applicable",
+        "cold_experts": "not_applicable",
+        "kv_cache": "vram_priority",
+        "recommended_mode": "full_gpu_or_light_layer_offload"
+      },
+      "evidence": {
+        "source_type": "local_ollama_inventory_and_official_ollama_catalog",
+        "community_signal": "General-purpose instruct behavior; Q4_0 trades memory for quality relative to Q4_K_M.",
+        "status": "seed_prior_not_local_benchmark_verified"
+      }
+    }
+  ],
+  "runtime_evidence_schema": {
+    "prompt_hash": "HMAC_or_local_stable_hash_only",
+    "prompt_flags": ["knowledge_area", "task_type", "required_tools", "context_quality", "estimated_context_tokens"],
+    "model_id": "catalog_model_id",
+    "model_digest": "immutable_model_digest",
+    "execution": ["phase", "tokens_in", "tokens_out", "latency_ms", "tokens_per_second"],
+    "residency": ["active_layers", "active_experts", "expert_hits", "expert_misses", "h2d_bytes", "d2h_bytes", "ssd_bytes", "kv_cache_mb"],
+    "decision": ["policy_id", "prefetch_depth", "cpu_threads", "cache_budget_mb", "confidence"],
+    "outcome": ["tool_calls", "exit_code", "quality_score", "user_correction", "retry_count"],
+    "privacy_rule": "Keine Rohprompts oder Geheimnisse speichern; nur Hash, abgeleitete Flags und technische Trace-Daten."
+  },
+  "sources": [
+    {
+      "title": "Qwen3-Coder-30B-A3B-Instruct config.json",
+      "url": "https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct/blob/main/config.json",
+      "used_for": "MoE architecture, 48 layers, 128 experts, 8 experts per token"
+    },
+    {
+      "title": "Qwen3-Coder Ollama model page",
+      "url": "https://ollama.com/library/qwen3-coder",
+      "used_for": "30B total/3.3B active approximation, 256K catalog context, coding/agentic positioning"
+    },
+    {
+      "title": "Qwen2.5-Coder-14B-Instruct config.json",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct/blob/main/config.json",
+      "used_for": "dense architecture, 48 layers, attention dimensions"
+    },
+    {
+      "title": "Qwen3-14B config.json",
+      "url": "https://huggingface.co/Qwen/Qwen3-14B/blob/main/config.json",
+      "used_for": "dense architecture, 40 layers, attention dimensions"
+    },
+    {
+      "title": "Dolphin3 Ollama model page",
+      "url": "https://ollama.com/library/dolphin3/tags",
+      "used_for": "Llama 3.1 8B family and quantized size/context variants"
+    },
+    {
+      "title": "MoE-Infinity",
+      "url": "https://arxiv.org/abs/2401.14361",
+      "used_for": "activation-aware tracing, expert prefetching and caching rationale"
+    },
+    {
+      "title": "CUDA asynchronous execution",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html",
+      "used_for": "pinned host memory and asynchronous transfer policy"
+    }
+  ]
+}
