@@ -323,3 +323,4 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Hixx-Server Team");
 MODULE_DESCRIPTION("Hixx-Server Kernel-Native Inference Worker v2.0");
 MODULE_VERSION("2.0.0");
+

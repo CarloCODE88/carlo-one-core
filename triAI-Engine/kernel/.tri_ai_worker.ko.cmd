@@ -1,1 +1,0 @@
-savedcmd_tri_ai_worker.ko := ld.lld -r -m elf_x86_64 -mllvm -import-instr-limit=5 --mllvm=-enable-fs-discriminator=true --mllvm=-improved-fs-discriminator=true -plugin-opt=thinlto -plugin-opt=-split-machine-functions -z noexecstack --build-id=sha1  -T /usr/lib/modules/7.2.4-3-cachyos/build/scripts/module.lds -o tri_ai_worker.ko tri_ai_worker.o tri_ai_worker.mod.o .module-common.o

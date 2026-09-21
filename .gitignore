@@ -39,5 +39,16 @@ hixx-native/.*.cmd
 hixx-native/hixx.pid
 hixx-native/hixx_daemon.log
 
+# triAI generated kernel metadata and build outputs
+triAI-Engine/target/
+triAI-Engine/kernel/*.o
+triAI-Engine/kernel/*.ko
+triAI-Engine/kernel/*.mod*
+triAI-Engine/kernel/Module.symvers
+triAI-Engine/kernel/modules.order
+triAI-Engine/kernel/.*.cmd
+triAI-Engine/kernel/..module-common.o
+triAI-Engine/tri-ai-events.jsonl
+
 # Keep the HIXX dependency lockfile despite the workspace-wide rule above.
 !hixx-native/Cargo.lock
