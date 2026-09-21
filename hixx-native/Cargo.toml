@@ -1,0 +1,26 @@
+[package]
+name = "hixx-server"
+version = "0.1.0"
+edition = "2021"
+description = "High-Performance Kernel-Native AI Server"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+libc = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hyper = { version = "0.14", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+trayicon = "0.4.1"
+base64 = "0.21"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[[bin]]
+name = "hixx-server"
+path = "src/main.rs"

@@ -20,3 +20,24 @@ build/
 # Environment
 .env
 .env.local
+
+# HIXX generated kernel metadata and build outputs
+hixx-native/target/
+hixx-native/kernel/*.o
+hixx-native/kernel/*.ko
+hixx-native/kernel/*.mod*
+hixx-native/kernel/Module.symvers
+hixx-native/kernel/modules.order
+hixx-native/kernel/.*.cmd
+hixx-native/kernel/..module-common.o
+hixx-native/*.o
+hixx-native/*.ko
+hixx-native/*.mod*
+hixx-native/Module.symvers
+hixx-native/modules.order
+hixx-native/.*.cmd
+hixx-native/hixx.pid
+hixx-native/hixx_daemon.log
+
+# Keep the HIXX dependency lockfile despite the workspace-wide rule above.
+!hixx-native/Cargo.lock
