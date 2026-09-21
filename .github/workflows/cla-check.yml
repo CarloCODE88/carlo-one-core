@@ -1,0 +1,21 @@
+name: CLA Check
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+jobs:
+  check-cla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CLA
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            // CLA check logic placeholder
+            // TODO: Integrate CLA Assistant bot
+            core.info('CLA check passed (placeholder)');
